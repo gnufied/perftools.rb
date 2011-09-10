@@ -1,8 +1,8 @@
 diff --git a/Makefile.in b/Makefile.in
-index 232d2ec..566d77c 100644
+index 0e51024..b301f4d 100644
 --- a/Makefile.in
 +++ b/Makefile.in
-@@ -1367,13 +1367,13 @@ AUTOMAKE = @AUTOMAKE@
+@@ -1408,13 +1408,13 @@ AUTOMAKE = @AUTOMAKE@
  AWK = @AWK@
  CC = @CC@
  CCDEPMODE = @CCDEPMODE@
@@ -19,10 +19,10 @@ index 232d2ec..566d77c 100644
  DEFS = @DEFS@
  DEPDIR = @DEPDIR@
 diff --git a/src/profile-handler.cc b/src/profile-handler.cc
-index e658d30..370d012 100644
+index 1946f7c..5df5054 100644
 --- a/src/profile-handler.cc
 +++ b/src/profile-handler.cc
-@@ -264,6 +264,11 @@ ProfileHandler::~ProfileHandler() {
+@@ -267,6 +267,11 @@ ProfileHandler::~ProfileHandler() {
  void ProfileHandler::RegisterThread() {
    SpinLockHolder cl(&control_lock_);
  
@@ -34,7 +34,7 @@ index e658d30..370d012 100644
    // We try to detect whether timers are being shared by setting a
    // timer in the first call to this function, then checking whether
    // it's set in the second call.
-@@ -305,6 +310,7 @@ void ProfileHandler::RegisterThread() {
+@@ -308,6 +313,7 @@ void ProfileHandler::RegisterThread() {
        StartTimer();
        break;
    }
@@ -43,10 +43,10 @@ index e658d30..370d012 100644
  
  ProfileHandlerToken* ProfileHandler::RegisterCallback(
 diff --git a/src/profiledata.cc b/src/profiledata.cc
-index 5f2531b..ea95493 100644
+index 5f2531b..434e2ed 100644
 --- a/src/profiledata.cc
 +++ b/src/profiledata.cc
-@@ -56,6 +56,19 @@ const int ProfileData::kAssociativity;
+@@ -56,6 +56,20 @@ const int ProfileData::kAssociativity;
  const int ProfileData::kBuckets;
  const int ProfileData::kBufferLength;
  
@@ -58,6 +58,7 @@ index 5f2531b..ea95493 100644
 +  void rb_gc();
 +  const char *rb_id2name(ID);
 +  const char *rb_class2name(VALUE);
++  int ruby_running();
 +}
 +
 +#include <set>
@@ -66,7 +67,7 @@ index 5f2531b..ea95493 100644
  ProfileData::Options::Options()
      : frequency_(1) {
  }
-@@ -63,17 +76,33 @@ ProfileData::Options::Options()
+@@ -63,17 +77,33 @@ ProfileData::Options::Options()
  // This function is safe to call from asynchronous signals (but is not
  // re-entrant).  However, that's not part of its public interface.
  void ProfileData::Evict(const Entry& entry) {
@@ -100,7 +101,7 @@ index 5f2531b..ea95493 100644
  }
  
  ProfileData::ProfileData()
-@@ -85,6 +114,7 @@ ProfileData::ProfileData()
+@@ -85,6 +115,7 @@ ProfileData::ProfileData()
        evictions_(0),
        total_bytes_(0),
        fname_(0),
@@ -108,7 +109,7 @@ index 5f2531b..ea95493 100644
        start_time_(0) {
  }
  
-@@ -101,6 +131,13 @@ bool ProfileData::Start(const char* fname,
+@@ -101,6 +132,13 @@ bool ProfileData::Start(const char* fname,
      return false;
    }
  
@@ -122,7 +123,20 @@ index 5f2531b..ea95493 100644
    start_time_ = time(NULL);
    fname_ = strdup(fname);
  
-@@ -166,16 +203,61 @@ void ProfileData::Stop() {
+@@ -129,7 +167,12 @@ bool ProfileData::Start(const char* fname,
+ }
+ 
+ ProfileData::~ProfileData() {
++#ifdef BUILD_FOR_RUBY
++  if(ruby_running())
++    Stop();
++#else
+   Stop();
++#endif
+ }
+ 
+ // Dump /proc/maps data to fd.  Copied from heap-profile-table.cc.
+@@ -166,16 +209,61 @@ void ProfileData::Stop() {
      return;
    }
  
@@ -185,7 +199,7 @@ index 5f2531b..ea95493 100644
    if (num_evicted_ + 3 > kBufferLength) {
      // Ensure there is enough room for end of data marker
      FlushEvicted();
-@@ -211,6 +293,10 @@ void ProfileData::Reset() {
+@@ -211,6 +299,10 @@ void ProfileData::Reset() {
    num_evicted_ = 0;
    free(fname_);
    fname_ = 0;
@@ -197,7 +211,7 @@ index 5f2531b..ea95493 100644
  
    out_ = -1;
 diff --git a/src/profiledata.h b/src/profiledata.h
-index da7ea9e..67c463d 100644
+index 3521bac..2f013e6 100644
 --- a/src/profiledata.h
 +++ b/src/profiledata.h
 @@ -169,6 +169,7 @@ class ProfileData {
@@ -209,23 +223,38 @@ index da7ea9e..67c463d 100644
  
    // Move 'entry' to the eviction buffer.
 diff --git a/src/profiler.cc b/src/profiler.cc
-index 183a7c7..d89a53a 100644
+index 3ac51d4..305f0fb 100644
 --- a/src/profiler.cc
 +++ b/src/profiler.cc
-@@ -63,6 +63,12 @@ typedef int ucontext_t;   // just to quiet the compiler, mostly
+@@ -68,6 +68,14 @@ typedef int ucontext_t;   // just to quiet the compiler, mostly
  #include "conflict-signal.h"          /* used on msvc machines */
  #endif
  
 +#ifdef BUILD_FOR_RUBY
 +extern "C" {
 +  int rb_stack_trace(void**,int);
++  int ruby_running();
 +}
++
 +#endif
 +
  using std::string;
  
  // Collects up all profile data.  This is a singleton, which is
-@@ -261,6 +267,9 @@ void CpuProfiler::prof_handler(int sig, siginfo_t*, void* signal_ucontext,
+@@ -182,7 +190,12 @@ bool CpuProfiler::Start(const char* fname, const ProfilerOptions* options) {
+ }
+ 
+ CpuProfiler::~CpuProfiler() {
++#ifdef BUILD_FOR_RUBY
++  if(ruby_running())
++    Stop();
++#else
+   Stop();
++#endif
+ }
+ 
+ // Stop profiling and write out any collected profile data
+@@ -266,6 +279,9 @@ void CpuProfiler::prof_handler(int sig, siginfo_t*, void* signal_ucontext,
        (*instance->filter_)(instance->filter_arg_)) {
      void* stack[ProfileData::kMaxStackDepth];
  
@@ -235,7 +264,7 @@ index 183a7c7..d89a53a 100644
      // The top-most active routine doesn't show up as a normal
      // frame, but as the "pc" value in the signal handler context.
      stack[0] = GetPC(*reinterpret_cast<ucontext_t*>(signal_ucontext));
-@@ -274,8 +283,10 @@ void CpuProfiler::prof_handler(int sig, siginfo_t*, void* signal_ucontext,
+@@ -279,8 +295,10 @@ void CpuProfiler::prof_handler(int sig, siginfo_t*, void* signal_ucontext,
      int depth = GetStackTraceWithContext(stack + 1, arraysize(stack) - 1,
                                           2, signal_ucontext);
      depth++;  // To account for pc value in stack[0];
@@ -247,8 +276,21 @@ index 183a7c7..d89a53a 100644
    }
  }
  
+@@ -308,7 +326,12 @@ extern "C" PERFTOOLS_DLL_DECL int ProfilerStartWithOptions(
+ }
+ 
+ extern "C" PERFTOOLS_DLL_DECL void ProfilerStop() {
++#ifdef BUILD_FOR_RUBY
++  if(ruby_running())
++    CpuProfiler::instance_.Stop();
++#else
+   CpuProfiler::instance_.Stop();
++#endif
+ }
+ 
+ extern "C" PERFTOOLS_DLL_DECL void ProfilerGetCurrentState(
 diff --git a/src/stacktrace.cc b/src/stacktrace.cc
-index d158eea..e8509fe 100644
+index 68cb865..53f9d4f 100644
 --- a/src/stacktrace.cc
 +++ b/src/stacktrace.cc
 @@ -52,6 +52,7 @@
@@ -259,7 +301,7 @@ index d158eea..e8509fe 100644
  #include <config.h>
  #include <google/stacktrace.h>
  #include "stacktrace_config.h"
-@@ -69,3 +70,4 @@
+@@ -107,3 +108,4 @@
  #else
  # error Cannot calculate stack trace: will need to write for your environment
  #endif

@@ -179,6 +179,17 @@ static VALUE Isend;
     return depth;
   }
 
+  int
+  ruby_running()
+  {
+    int retval = 0;
+    if(GET_VM() != NULL)
+      retval = 1;
+    else
+      retval = 0;
+    return retval;
+  }
+
   #if 0
   void
   rb_dump_stack()
