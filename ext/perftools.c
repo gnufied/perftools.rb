@@ -50,6 +50,12 @@ static VALUE Isend;
   }
 
   int
+  ruby_running()
+  {
+    return 1;
+  }
+
+  int
   rb_stack_trace(void** result, int max_depth)
   {
     struct FRAME *frame = ruby_frame;
@@ -182,12 +188,10 @@ static VALUE Isend;
   int
   ruby_running()
   {
-    int retval = 0;
     if(GET_VM() != NULL)
-      retval = 1;
+      return 1;
     else
-      retval = 0;
-    return retval;
+      return 0;
   }
 
   #if 0
